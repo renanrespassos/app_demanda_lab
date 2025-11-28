@@ -236,8 +236,8 @@ def seed_default_microareas_atividades(microareas, atividades):
                 "microarea": grupo,
                 "categoria": "",
                 "responsavel_funcao": "",
-                "hh_por_unidade": 1.0,      # ajusta depois
-                "fator_por_projeto": 1.0    # quantas vezes essa atividade aparece por projeto
+                "hh_por_unidade": 1.0,      # armazena em horas
+                "fator_por_projeto": 1.0    # quantas execuções por projeto
             }
             novas_ativ.append(new)
             existentes_ativ.add(nome)
@@ -442,7 +442,61 @@ def tela_colaboradores():
         df_show["capacidade_mensal_22d"] = df_show["capacidade_diaria"] * 22
         st.dataframe(df_show, use_container_width=True)
 
-    # Configuração de área de atuação e atividades por colaborador
+    # Editar / excluir colaborador
+    st.subheader("Editar / excluir colaborador")
+    if not colabs.empty:
+        nomes_colab = colabs["nome"].tolist()
+        sel_nome = st.selectbox("Selecione um colaborador para editar/excluir", options=[""] + nomes_colab)
+        if sel_nome:
+            row = colabs[colabs["nome"] == sel_nome].iloc[0]
+            col1, col2 = st.columns(2)
+            with col1:
+                novo_nome = st.text_input("Nome", value=row["nome"], key="edit_colab_nome")
+                novo_cargo = st.selectbox(
+                    "Cargo",
+                    ["Estagiário", "Assistente", "Analista", "Especialista", "Coordenador"],
+                    index=["Estagiário", "Assistente", "Analista", "Especialista", "Coordenador"].index(row["cargo"]) if row["cargo"] in ["Estagiário", "Assistente", "Analista", "Especialista", "Coordenador"] else 0,
+                    key="edit_colab_cargo"
+                )
+                nova_carga = st.number_input(
+                    "Carga horária diária (h)",
+                    min_value=1.0, max_value=12.0,
+                    value=float(row["carga_diaria"]) if not pd.isna(row["carga_diaria"]) else 8.0,
+                    step=0.5,
+                    key="edit_colab_carga"
+                )
+            with col2:
+                micro_princ = st.selectbox(
+                    "Micro-área principal",
+                    options=[""] + microareas["nome"].tolist(),
+                    index=0 if row["microarea_principal"] not in microareas["nome"].tolist()
+                    else ([""] + microareas["nome"].tolist()).index(row["microarea_principal"]),
+                    key="edit_colab_micro"
+                )
+                ativo_flag = st.checkbox("Ativo", value=(row["ativo"] == "sim"), key="edit_colab_ativo")
+
+            col_a, col_b = st.columns(2)
+            with col_a:
+                if st.button("Salvar alterações do colaborador"):
+                    colabs.loc[colabs["id"] == row["id"], "nome"] = novo_nome
+                    colabs.loc[colabs["id"] == row["id"], "cargo"] = novo_cargo
+                    colabs.loc[colabs["id"] == row["id"], "carga_diaria"] = nova_carga
+                    colabs.loc[colabs["id"] == row["id"], "microarea_principal"] = micro_princ
+                    colabs.loc[colabs["id"] == row["id"], "ativo"] = "sim" if ativo_flag else "nao"
+                    save_csv(PATH_COLAB, colabs)
+                    st.success("Colaborador atualizado.")
+            with col_b:
+                if st.button("Excluir colaborador"):
+                    # remove vínculos
+                    colab_ativ = get_colab_atividades()
+                    colab_ativ = colab_ativ[colab_ativ["colab_id"] != row["id"]]
+                    save_csv(PATH_COLAB_ATIV, colab_ativ)
+                    # remove colaborador
+                    colabs = colabs[colabs["id"] != row["id"]]
+                    save_csv(PATH_COLAB, colabs)
+                    st.success("Colaborador excluído.")
+
+    # Configuração de área de atuação e atividades por colaborador (modo rápido com multiselect)
     st.subheader("Configurar área de atuação e atividades do colaborador")
 
     if colabs.empty or atividades.empty or microareas.empty:
@@ -465,56 +519,60 @@ def tela_colaboradores():
         )
 
         micro_sel = st.selectbox(
-            "Micro-área da atividade",
+            "Micro-área das atividades a vincular",
             options=microareas["nome"].tolist()
         )
 
         atividades_micro = atividades[atividades["microarea"] == micro_sel]
         if atividades_micro.empty:
             st.warning("Não há atividades cadastradas para esta micro-área.")
-            atividade_nome = None
+            atividades_sel = []
         else:
-            atividade_nome = st.selectbox(
-                "Atividade",
+            atividades_sel = st.multiselect(
+                "Atividades para vincular a este colaborador",
                 options=atividades_micro["nome"].tolist()
             )
 
         percentual = st.number_input(
-            "Percentual de participação do colaborador nesta atividade (%)",
+            "Percentual de participação do colaborador em cada atividade selecionada (%)",
             min_value=0.0, max_value=100.0, value=50.0, step=5.0
         )
 
-        submitted_atuacao = st.form_submit_button("Salvar participação")
+        submitted_atuacao = st.form_submit_button("Salvar vínculos de atividades")
 
         if submitted_atuacao:
+            # atualiza microárea principal
             colabs.loc[colabs["id"] == colab_id, "microarea_principal"] = micro_princ
             save_csv(PATH_COLAB, colabs)
 
-            if atividade_nome is None:
-                st.error("Selecione uma atividade válida.")
+            if not atividades_sel:
+                st.error("Selecione ao menos uma atividade.")
             else:
-                ativ_row = atividades[atividades["nome"] == atividade_nome].iloc[0]
-                atividade_id = int(ativ_row["id"])
-                new_map = {
-                    "id": new_id(colab_ativ),
-                    "colab_id": colab_id,
-                    "atividade_id": atividade_id,
-                    "microarea": micro_sel,
-                    "percentual": percentual
-                }
-                colab_ativ = pd.concat(
-                    [colab_ativ, pd.DataFrame([new_map])],
-                    ignore_index=True
-                )
-                save_csv(PATH_COLAB_ATIV, colab_ativ)
-                st.success("Área de atuação / atividade registrada para o colaborador.")
+                colab_ativ = get_colab_atividades()
+                novos = []
+                for nome_ativ in atividades_sel:
+                    ativ_row = atividades[atividades["nome"] == nome_ativ].iloc[0]
+                    atividade_id = int(ativ_row["id"])
+                    base = colab_ativ if not novos else pd.concat([colab_ativ, pd.DataFrame(novos)], ignore_index=True)
+                    novos.append({
+                        "id": new_id(base),
+                        "colab_id": colab_id,
+                        "atividade_id": atividade_id,
+                        "microarea": micro_sel,
+                        "percentual": percentual
+                    })
+                if novos:
+                    colab_ativ = pd.concat([colab_ativ, pd.DataFrame(novos)], ignore_index=True)
+                    save_csv(PATH_COLAB_ATIV, colab_ativ)
+                    st.success("Vínculos de atividades registrados para o colaborador.")
 
-    st.subheader("Mapa de atividades por colaborador")
+    # Editar / excluir vínculos
+    st.subheader("Editar / excluir vínculos de colaborador x atividade")
     colab_ativ = get_colab_atividades()
     if colab_ativ.empty:
         st.info("Ainda não há atividades vinculadas a colaboradores.")
     else:
-        df_show = colab_ativ.merge(
+        df_map = colab_ativ.merge(
             colabs[["id", "nome"]],
             left_on="colab_id",
             right_on="id",
@@ -526,13 +584,42 @@ def tela_colaboradores():
             how="left",
             suffixes=("_colab", "_ativ")
         )
-        df_show = df_show[["nome_colab", "nome_ativ", "microarea_ativ", "percentual"]]
-        df_show.rename(columns={
+        df_map_show = df_map[["id_x", "nome_colab", "nome_ativ", "microarea", "percentual"]]
+        df_map_show.rename(columns={
+            "id_x": "id_vinculo",
             "nome_colab": "colaborador",
-            "nome_ativ": "atividade",
-            "microarea_ativ": "microarea"
+            "nome_ativ": "atividade"
         }, inplace=True)
-        st.dataframe(df_show, use_container_width=True)
+        st.dataframe(df_map_show, use_container_width=True)
+
+        labels = df_map_show.apply(
+            lambda r: f'{int(r["id_vinculo"])} - {r["colaborador"]} - {r["atividade"]} ({r["microarea"]})',
+            axis=1
+        ).tolist()
+        ids = df_map_show["id_vinculo"].tolist()
+        sel_label = st.selectbox("Selecione um vínculo para editar/excluir", options=[""] + labels)
+        if sel_label:
+            idx = labels.index(sel_label)
+            vinc_id = ids[idx]
+            vinc_row = colab_ativ[colab_ativ["id"] == vinc_id].iloc[0]
+            novo_percentual = st.number_input(
+                "Percentual (%)",
+                min_value=0.0, max_value=100.0,
+                value=float(vinc_row["percentual"]) if not pd.isna(vinc_row["percentual"]) else 0.0,
+                step=5.0,
+                key=f"edit_vinc_{vinc_id}"
+            )
+            col_a, col_b = st.columns(2)
+            with col_a:
+                if st.button("Salvar percentual do vínculo"):
+                    colab_ativ.loc[colab_ativ["id"] == vinc_id, "percentual"] = novo_percentual
+                    save_csv(PATH_COLAB_ATIV, colab_ativ)
+                    st.success("Vínculo atualizado.")
+            with col_b:
+                if st.button("Excluir vínculo"):
+                    colab_ativ = colab_ativ[colab_ativ["id"] != vinc_id]
+                    save_csv(PATH_COLAB_ATIV, colab_ativ)
+                    st.success("Vínculo excluído.")
 
 # ---------------------------
 # Tela: Micro-áreas & Atividades
@@ -551,7 +638,7 @@ def tela_microareas_atividades():
 
     tab_micro, tab_ativ = st.tabs(["Micro-áreas", "Atividades"])
 
-    # Micro-áreas
+    # ---------------- Micro-áreas ----------------
     with tab_micro:
         st.subheader("Nova micro-área")
         with st.form("form_micro"):
@@ -584,9 +671,49 @@ def tela_microareas_atividades():
         else:
             st.dataframe(microareas, use_container_width=True)
 
-    # Atividades
+        # Editar / excluir micro-área
+        st.subheader("Editar / excluir micro-área")
+        if not microareas.empty:
+            nomes_micro = microareas["nome"].tolist()
+            sel_micro = st.selectbox("Selecione uma micro-área", options=[""] + nomes_micro)
+            if sel_micro:
+                row = microareas[microareas["nome"] == sel_micro].iloc[0]
+                novo_nome = st.text_input("Nome da micro-área", value=row["nome"], key="edit_micro_nome")
+                nova_desc = st.text_area("Descrição", value=row["descricao"] if row["descricao"] else "", key="edit_micro_desc")
+
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    if st.button("Salvar alterações da micro-área"):
+                        old_name = row["nome"]
+                        microareas.loc[microareas["id"] == row["id"], "nome"] = novo_nome
+                        microareas.loc[microareas["id"] == row["id"], "descricao"] = nova_desc
+                        save_csv(PATH_MICRO, microareas)
+
+                        # atualiza referências em atividades, colaboradores e vínculos
+                        atividades = get_atividades()
+                        atividades.loc[atividades["microarea"] == old_name, "microarea"] = novo_nome
+                        save_csv(PATH_ATIV, atividades)
+
+                        colabs = get_colaboradores()
+                        colabs.loc[colabs["microarea_principal"] == old_name, "microarea_principal"] = novo_nome
+                        save_csv(PATH_COLAB, colabs)
+
+                        colab_ativ = get_colab_atividades()
+                        colab_ativ.loc[colab_ativ["microarea"] == old_name, "microarea"] = novo_nome
+                        save_csv(PATH_COLAB_ATIV, colab_ativ)
+
+                        st.success("Micro-área atualizada.")
+                with col_b:
+                    if st.button("Excluir micro-área"):
+                        # ATENÇÃO: aqui apenas excluímos a microárea;
+                        # atividades ainda podem referenciar essa microárea.
+                        microareas = microareas[microareas["id"] != row["id"]]
+                        save_csv(PATH_MICRO, microareas)
+                        st.success("Micro-área excluída. Verifique atividades associadas.")
+
+    # ---------------- Atividades ----------------
     with tab_ativ:
-        st.subheader("Nova atividade")
+        st.subheader("Nova atividade (tempo em minutos)")
 
         with st.form("form_ativ"):
             nome_ativ = st.text_input("Nome da atividade")
@@ -602,9 +729,10 @@ def tela_microareas_atividades():
                 "Responsável pela função (opcional)",
                 options=[""] + colabs["nome"].tolist()
             )
-            hh_por_unidade = st.number_input(
-                "Horas por execução dessa atividade (hh/unidade)",
-                min_value=0.0, step=0.5, value=1.0
+
+            min_por_unidade = st.number_input(
+                "Tempo por execução da atividade (minutos)",
+                min_value=0.0, step=5.0, value=60.0
             )
             fator_por_projeto = st.number_input(
                 "Fator por projeto (quantas execuções dessa atividade por projeto)",
@@ -616,6 +744,7 @@ def tela_microareas_atividades():
                 if not nome_ativ or not micro:
                     st.error("Informe pelo menos nome da atividade e micro-área.")
                 else:
+                    hh_por_unidade = min_por_unidade / 60.0  # converte minutos -> horas
                     new = {
                         "id": new_id(atividades),
                         "nome": nome_ativ,
@@ -636,7 +765,81 @@ def tela_microareas_atividades():
         if atividades.empty:
             st.info("Nenhuma atividade cadastrada ainda.")
         else:
-            st.dataframe(atividades, use_container_width=True)
+            df_show = atividades.copy()
+            df_show["min_por_unidade"] = (df_show["hh_por_unidade"].fillna(0) * 60).round(1)
+            st.dataframe(df_show, use_container_width=True)
+
+        # Editar / excluir atividade
+        st.subheader("Editar / excluir atividade")
+        if not atividades.empty:
+            nomes_ativ = atividades["nome"].tolist()
+            sel_ativ = st.selectbox("Selecione uma atividade", options=[""] + nomes_ativ)
+            if sel_ativ:
+                row = atividades[atividades["nome"] == sel_ativ].iloc[0]
+                col1, col2 = st.columns(2)
+                with col1:
+                    novo_nome = st.text_input("Nome da atividade", value=row["nome"], key="edit_ativ_nome")
+                    micro = st.selectbox(
+                        "Micro-área",
+                        options=microareas["nome"].tolist(),
+                        index=microareas["nome"].tolist().index(row["microarea"]) if row["microarea"] in microareas["nome"].tolist() else 0,
+                        key="edit_ativ_micro"
+                    )
+                    categoria = st.text_input(
+                        "Categoria",
+                        value=row["categoria"] if row["categoria"] else "",
+                        key="edit_ativ_cat"
+                    )
+                with col2:
+                    responsavel_funcao = st.selectbox(
+                        "Responsável pela função",
+                        options=[""] + colabs["nome"].tolist(),
+                        index=([""] + colabs["nome"].tolist()).index(row["responsavel_funcao"]) if row["responsavel_funcao"] in colabs["nome"].tolist() else 0,
+                        key="edit_ativ_resp"
+                    )
+                    min_por_unidade_edit = st.number_input(
+                        "Tempo por execução (minutos)",
+                        min_value=0.0,
+                        step=5.0,
+                        value=float(row["hh_por_unidade"]) * 60.0 if not pd.isna(row["hh_por_unidade"]) else 60.0,
+                        key="edit_ativ_min"
+                    )
+                    fator_por_projeto = st.number_input(
+                        "Fator por projeto",
+                        min_value=0.0,
+                        step=0.1,
+                        value=float(row["fator_por_projeto"]) if not pd.isna(row["fator_por_projeto"]) else 1.0,
+                        key="edit_ativ_fator"
+                    )
+
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    if st.button("Salvar alterações da atividade"):
+                        atividades = get_atividades()
+                        hh_por_unidade_edit = min_por_unidade_edit / 60.0
+                        atividades.loc[atividades["id"] == row["id"], "nome"] = novo_nome
+                        atividades.loc[atividades["id"] == row["id"], "microarea"] = micro
+                        atividades.loc[atividades["id"] == row["id"], "categoria"] = categoria
+                        atividades.loc[atividades["id"] == row["id"], "responsavel_funcao"] = responsavel_funcao
+                        atividades.loc[atividades["id"] == row["id"], "hh_por_unidade"] = hh_por_unidade_edit
+                        atividades.loc[atividades["id"] == row["id"], "fator_por_projeto"] = fator_por_projeto
+                        save_csv(PATH_ATIV, atividades)
+                        st.success("Atividade atualizada.")
+                with col_b:
+                    if st.button("Excluir atividade"):
+                        # remove demandas e vínculos associados
+                        demandas = get_demandas()
+                        demandas = demandas[demandas["atividade_id"] != row["id"]]
+                        save_csv(PATH_DEM, demandas)
+
+                        colab_ativ = get_colab_atividades()
+                        colab_ativ = colab_ativ[colab_ativ["atividade_id"] != row["id"]]
+                        save_csv(PATH_COLAB_ATIV, colab_ativ)
+
+                        atividades = get_atividades()
+                        atividades = atividades[atividades["id"] != row["id"]]
+                        save_csv(PATH_ATIV, atividades)
+                        st.success("Atividade excluída.")
 
 # ---------------------------
 # Tela: Demandas
@@ -708,11 +911,13 @@ def tela_demandas():
             suffixes=("_dem", "_ativ")
         )
 
-        # id da demanda = id_dem; nome da atividade = nome
+        # define id_demanda de forma robusta
         if "id_dem" in df_show.columns:
             df_show.rename(columns={"id_dem": "id_demanda"}, inplace=True)
-        else:
+        elif "id_x" in df_show.columns:
             df_show.rename(columns={"id_x": "id_demanda"}, inplace=True)
+        else:
+            df_show.rename(columns={"id": "id_demanda"}, inplace=True)
 
         df_show["hh_total_atividade"] = df_show["quantidade"] * df_show["hh_por_unidade"]
         df_show.rename(columns={"nome": "atividade"}, inplace=True)
@@ -724,6 +929,18 @@ def tela_demandas():
         cols = [c for c in cols if c in df_show.columns]
 
         st.dataframe(df_show[cols], use_container_width=True)
+
+    # opção para limpar demandas de um período
+    st.subheader("Excluir demandas de um período")
+    demandas = get_demandas()
+    if not demandas.empty:
+        periodos = sorted(demandas["periodo"].dropna().unique().tolist())
+        sel_per = st.selectbox("Período para limpar demandas", options=[""] + periodos)
+        if sel_per:
+            if st.button("Excluir todas as demandas desse período"):
+                demandas = demandas[demandas["periodo"] != sel_per]
+                save_csv(PATH_DEM, demandas)
+                st.success(f"Demandas do período {sel_per} excluídas.")
 
 # ---------------------------
 # Tela: Painel
@@ -790,10 +1007,9 @@ def tela_painel():
         st.info("Nenhuma demanda para o período selecionado.")
     else:
         st.dataframe(df_micro, use_container_width=True)
-        if not df_micro.set_index("microarea")[["hh_necessarias", "capacidade_mensal"]].empty:
-            st.bar_chart(
-                df_micro.set_index("microarea")[["hh_necessarias", "capacidade_mensal"]]
-            )
+        data_chart = df_micro.set_index("microarea")[["hh_necessarias", "capacidade_mensal"]]
+        if not data_chart.empty:
+            st.bar_chart(data_chart)
 
     # Colaboradores
     st.subheader("Utilização por colaborador (mensal)")
