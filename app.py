@@ -3,7 +3,7 @@ import pandas as pd
 import os
 
 # ---------------------------
-# Configuração básica e paths
+# Paths e diretórios
 # ---------------------------
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -14,9 +14,84 @@ PATH_ATIV = os.path.join(DATA_DIR, "atividades.csv")
 PATH_DEM = os.path.join(DATA_DIR, "demandas.csv")
 PATH_COLAB_ATIV = os.path.join(DATA_DIR, "colab_atividades.csv")
 
+# ---------------------------
+# Lista padrão Grupo (microárea) x Atividade
+# ---------------------------
+DEFAULT_GRUPOS_ATIVIDADES = [
+    ("Entrada", "Fotos"),
+    ("Entrada", "Dar entrada labtrack"),
+    ("Entrada", "Dar entrada atlas"),
+    ("Entrada", "Montar minuta"),
+    ("Entrada", "Assinar ID"),
+    ("Entrada", "Emendas ID"),
+    ("Entrada", "Planilha ETS"),
+    ("Entrada", "Gerar minutas"),
+
+    ("17087", "Ensaiar aquecimento"),
+    ("17087", "Devolução"),
+    ("17087", "Choque"),
+    ("17087", "Fechar relatório 17087"),
+    ("17087", "Assinar 17087"),
+    ("17087", "Emendas 17087"),
+
+    ("EMC", "Radiada"),
+    ("EMC", "Imunidade"),
+    ("EMC", "Intensidade de campo"),
+    ("EMC", "Ensaio conduzido"),
+    ("EMC", "Imunidade conduzida"),
+    ("EMC", "Configurações EMC"),
+    ("EMC", "Fechar relatório EMC"),
+    ("EMC", "Assinar EMC"),
+    ("EMC", "Emendas EMC"),
+    ("EMC", "Ensaio acompanhado"),
+    ("EMC", "Estudo de Normas, Acompanhamento Clientes, Desenvolvimento da Área, Gerenciar a Agenda"),
+    ("EMC", "Dúvidas comercial"),
+    ("EMC", "Reuniões"),
+
+    ("RF", "Configurações RF"),
+    ("RF", "Wi-Fi"),
+    ("RF", "Ensaio DFS"),
+    ("RF", "Ensaio SAR"),
+    ("RF", "BT"),
+    ("RF", "Lora"),
+    ("RF", "Emendas RF"),
+    ("RF", "Fechar relatório RF"),
+    ("RF", "Assinar RF"),
+    ("RF", "Reuniões"),
+    ("RF", "Dúvidas comercial"),
+
+    ("EMC Extras", "Ensaios Eletrodomésticos"),
+    ("EMC Extras", "Devolver eletrodoméstico"),
+    ("EMC Extras", "Fechar relatório eletrodomésticos"),
+    ("EMC Extras", "Eletromedicos"),
+    ("EMC Extras", "Fechar relatório eletromedicos"),
+    ("EMC Extras", "Fechar relatório TV"),
+    ("EMC Extras", "TVs"),
+
+    ("3GPP", "IPV6"),
+    ("3GPP", "Ensaios Funcionais (2G, 3G e 4G)"),
+    ("3GPP", "Reuniões"),
+    ("3GPP", "Retestes"),
+    ("3GPP", "Funcional"),
+    ("3GPP", "Fechar relatório ipv6"),
+
+    ("Baterias", "Ensaio de Powerbank"),
+    ("Baterias", "Fechar relatório Powerbank"),
+    ("Baterias", "Organizar Powerbanks (devolução, cronograma, etc)"),
+
+    ("Acústicos", "Ensaio acústico"),
+    ("Acústicos", "Relatórios ensaio acústico"),
+    ("Acústicos", "Devolver amostras acústico"),
+    ("Acústicos", "Retirar amostras acústico"),
+    ("Acústicos", "Fotos das amostras acústico"),
+    ("Acústicos", "outros ensaios (Exemplo, TV)"),
+
+    ("Desenvolvimento", "Desenvolvimento de Melhorias"),
+]
+
 
 # ---------------------------
-# Funções utilitárias
+# Utilitários de dados
 # ---------------------------
 def load_csv(path, columns):
     if not os.path.exists(path):
@@ -24,7 +99,6 @@ def load_csv(path, columns):
         df.to_csv(path, index=False)
     else:
         df = pd.read_csv(path)
-    # garante todas as colunas
     for c in columns:
         if c not in df.columns:
             df[c] = None
@@ -33,6 +107,12 @@ def load_csv(path, columns):
 
 def save_csv(path, df):
     df.to_csv(path, index=False)
+
+
+def new_id(df):
+    if df.empty or "id" not in df.columns:
+        return 1
+    return int(df["id"].max()) + 1
 
 
 def get_colaboradores():
@@ -49,19 +129,21 @@ def get_colaboradores():
 
 
 def get_microareas():
-    cols = ["id", "nome", "descricao"]
-    return load_csv(PATH_MICRO, cols)
+    return load_csv(PATH_MICRO, ["id", "nome", "descricao"])
 
 
 def get_atividades():
     cols = [
         "id", "nome", "microarea", "categoria",
-        "responsavel_funcao", "hh_por_unidade"
+        "responsavel_funcao", "hh_por_unidade", "fator_por_projeto"
     ]
     df = load_csv(PATH_ATIV, cols)
     if df.empty:
         return df
     df["hh_por_unidade"] = pd.to_numeric(df["hh_por_unidade"], errors="coerce")
+    df["fator_por_projeto"] = pd.to_numeric(df["fator_por_projeto"], errors="coerce")
+    df["hh_por_unidade"] = df["hh_por_unidade"].fillna(1.0)
+    df["fator_por_projeto"] = df["fator_por_projeto"].fillna(1.0)
     return df
 
 
@@ -75,7 +157,6 @@ def get_demandas():
 
 
 def get_colab_atividades():
-    # vínculo colaborador x atividade x microarea x percentual
     cols = ["id", "colab_id", "atividade_id", "microarea", "percentual"]
     df = load_csv(PATH_COLAB_ATIV, cols)
     if df.empty:
@@ -86,34 +167,80 @@ def get_colab_atividades():
     return df
 
 
-def new_id(df):
-    if df.empty or "id" not in df.columns:
-        return 1
-    return int(df["id"].max()) + 1
+# ---------------------------
+# Seed inicial de micro-áreas + atividades
+# ---------------------------
+def seed_default_microareas_atividades(microareas, atividades):
+    # Micro-áreas
+    existentes_micro = set(microareas["nome"].dropna().tolist())
+    novas_micro = []
+
+    for grupo, _ in DEFAULT_GRUPOS_ATIVIDADES:
+        if grupo and grupo not in existentes_micro:
+            new = {
+                "id": new_id(microareas if not novas_micro else pd.concat([microareas, pd.DataFrame(novas_micro)], ignore_index=True)),
+                "nome": grupo,
+                "descricao": ""
+            }
+            novas_micro.append(new)
+            existentes_micro.add(grupo)
+
+    if novas_micro:
+        microareas = pd.concat([microareas, pd.DataFrame(novas_micro)], ignore_index=True)
+        save_csv(PATH_MICRO, microareas)
+
+    # Atividades
+    existentes_ativ = set(atividades["nome"].dropna().tolist())
+    novas_ativ = []
+
+    for grupo, nome in DEFAULT_GRUPOS_ATIVIDADES:
+        if nome not in existentes_ativ:
+            new = {
+                "id": new_id(atividades if not novas_ativ else pd.concat([atividades, pd.DataFrame(novas_ativ)], ignore_index=True)),
+                "nome": nome,
+                "microarea": grupo,
+                "categoria": "",
+                "responsavel_funcao": "",
+                "hh_por_unidade": 1.0,      # ajusta depois com seu tempo real
+                "fator_por_projeto": 1.0    # quantas vezes essa atividade aparece por projeto
+            }
+            novas_ativ.append(new)
+            existentes_ativ.add(nome)
+
+    if novas_ativ:
+        atividades = pd.concat([atividades, pd.DataFrame(novas_ativ)], ignore_index=True)
+        save_csv(PATH_ATIV, atividades)
+
+    return microareas, atividades
 
 
 # ---------------------------
 # Cálculos de capacidade e alocação
 # ---------------------------
-def calcular_capacidades(colabs, periodo):
-    # capacidade mensal simples: carga_diaria * 5 dias * 4 semanas
+def calcular_capacidades(colabs, dias_uteis):
+    """
+    capacidade_diaria = carga_diaria
+    capacidade_mensal = capacidade_diaria * dias_uteis
+    """
     df = colabs.copy()
-    df["capacidade_mensal"] = df["carga_diaria"].fillna(0) * 5 * 4
-    return df[["id", "nome", "cargo", "microarea_principal", "capacidade_mensal"]]
+    df["capacidade_diaria"] = df["carga_diaria"].fillna(0)
+    df["capacidade_mensal"] = df["capacidade_diaria"] * dias_uteis
+    return df[["id", "nome", "cargo", "microarea_principal", "capacidade_diaria", "capacidade_mensal"]]
 
 
-def calcular_alocacoes(colabs, microareas, atividades, demandas, colab_ativ, periodo):
-    # filtra demandas do período
+def calcular_alocacoes(colabs, microareas, atividades, demandas, colab_ativ, periodo, dias_uteis):
+    """
+    Usa demandas (quantidade por atividade) + hh_por_unidade das atividades
+    e distribui horas entre colaboradores de acordo com percentuais.
+    Também calcula demanda x capacidade por micro-área (mensal).
+    """
     dem = demandas[demandas["periodo"] == periodo].copy()
     if dem.empty:
         return (
             pd.DataFrame(columns=["id_colaborador", "hh_alocadas"]),
-            pd.DataFrame(columns=[
-                "microarea", "hh_necessarias", "capacidade_microarea", "saldo"
-            ])
+            pd.DataFrame(columns=["microarea", "hh_necessarias", "capacidade_mensal", "saldo"])
         )
 
-    # junta demanda com atividades
     ativ = atividades.copy()
     dem_ativ = dem.merge(
         ativ,
@@ -122,20 +249,16 @@ def calcular_alocacoes(colabs, microareas, atividades, demandas, colab_ativ, per
         suffixes=("_dem", "_ativ")
     )
 
-    # hh total da atividade (demanda)
-    dem_ativ["hh_total_atividade"] = (
-        dem_ativ["quantidade"] * dem_ativ["hh_por_unidade"]
-    )
+    # Horas totais por atividade no mês
+    dem_ativ["hh_total_atividade"] = dem_ativ["quantidade"] * dem_ativ["hh_por_unidade"]
 
-    # --- Distribuição das horas por colaborador, usando percentuais configurados ---
-    alocacoes = []
-
+    # Distribuição das horas por colaborador
+    alocs = []
     for _, row in dem_ativ.iterrows():
         atividade_id = int(row["atividade_id"])
         microarea = row["microarea"]
         hh_total = row["hh_total_atividade"]
 
-        # pega vínculo colaborador-atividade
         ca = colab_ativ[colab_ativ["atividade_id"] == atividade_id]
         if ca.empty:
             continue
@@ -146,37 +269,35 @@ def calcular_alocacoes(colabs, microareas, atividades, demandas, colab_ativ, per
             pesos = [1] * len(colab_ids)
 
         soma_pesos = float(sum(pesos))
-        for colab_id, peso in zip(colab_ids, pesos):
+        for cid, peso in zip(colab_ids, pesos):
             frac = peso / soma_pesos
-            hh_exec = hh_total * frac
-            alocacoes.append({
-                "id_colaborador": int(colab_id),
+            alocs.append({
+                "id_colaborador": int(cid),
                 "atividade_id": atividade_id,
                 "microarea": microarea,
-                "hh_alocadas": hh_exec
+                "hh_alocadas": hh_total * frac
             })
 
-    if not alocacoes:
+    if not alocs:
         df_aloc = pd.DataFrame(columns=["id_colaborador", "hh_alocadas"])
     else:
-        df_aloc = pd.DataFrame(alocacoes)
-        df_aloc = df_aloc.groupby("id_colaborador", as_index=False)["hh_alocadas"].sum()
+        df_aloc = pd.DataFrame(alocs).groupby("id_colaborador", as_index=False)["hh_alocadas"].sum()
 
-    # --- Demanda por microarea ---
+    # Demanda por micro-área
     dem_micro = dem_ativ.groupby("microarea", as_index=False)["hh_total_atividade"].sum()
     dem_micro.rename(columns={"hh_total_atividade": "hh_necessarias"}, inplace=True)
 
-    # --- Capacidade por microarea (usa microarea_principal de cada colaborador) ---
-    caps = calcular_capacidades(colabs, periodo)
+    # Capacidade mensal por micro-área
+    caps = calcular_capacidades(colabs, dias_uteis)
     cap_micro = caps.groupby("microarea_principal", as_index=False)["capacidade_mensal"].sum()
     cap_micro.rename(columns={
         "microarea_principal": "microarea",
-        "capacidade_mensal": "capacidade_microarea"
+        "capacidade_mensal": "capacidade_mensal"
     }, inplace=True)
 
     df_micro = dem_micro.merge(cap_micro, on="microarea", how="left")
-    df_micro["capacidade_microarea"] = df_micro["capacidade_microarea"].fillna(0)
-    df_micro["saldo"] = df_micro["capacidade_microarea"] - df_micro["hh_necessarias"]
+    df_micro["capacidade_mensal"] = df_micro["capacidade_mensal"].fillna(0)
+    df_micro["saldo"] = df_micro["capacidade_mensal"] - df_micro["hh_necessarias"]
 
     return df_aloc, df_micro
 
@@ -192,7 +313,7 @@ def tela_colaboradores():
     colab_ativ = get_colab_atividades()
     atividades = get_atividades()
 
-    # ---- Cadastro básico: Nome, Cargo, Carga horária ----
+    # Cadastro básico
     st.subheader("Novo colaborador")
 
     with st.form("form_colaborador"):
@@ -203,7 +324,6 @@ def tela_colaboradores():
             ["Estagiário", "Assistente", "Analista", "Especialista", "Coordenador"]
         )
 
-        # default de carga horária por cargo
         if cargo == "Estagiário":
             carga_default = 6.0
         else:
@@ -236,16 +356,17 @@ def tela_colaboradores():
                 save_csv(PATH_COLAB, colabs)
                 st.success("Colaborador salvo com sucesso!")
 
-    # ---- Tabela de colaboradores ----
+    # Tabela de colaboradores
     st.subheader("Colaboradores cadastrados")
     if colabs.empty:
         st.info("Nenhum colaborador cadastrado ainda.")
     else:
-        colabs_show = colabs.copy()
-        colabs_show["capacidade_mensal"] = colabs_show["carga_diaria"].fillna(0) * 5 * 4
-        st.dataframe(colabs_show, use_container_width=True)
+        df_show = colabs.copy()
+        df_show["capacidade_diaria"] = df_show["carga_diaria"].fillna(0)
+        df_show["capacidade_mensal_22d"] = df_show["capacidade_diaria"] * 22
+        st.dataframe(df_show, use_container_width=True)
 
-    # ---- Configurar área de atuação e atividades por colaborador ----
+    # Configuração de área de atuação e atividades por colaborador
     st.subheader("Configurar área de atuação e atividades do colaborador")
 
     if colabs.empty or atividades.empty or microareas.empty:
@@ -260,7 +381,6 @@ def tela_colaboradores():
         colab_row = colabs[colabs["nome"] == colab_nome].iloc[0]
         colab_id = int(colab_row["id"])
 
-        # micro-área principal do colaborador (para capacidade por microarea)
         micro_princ = st.selectbox(
             "Micro-área principal deste colaborador",
             options=[""] + microareas["nome"].tolist(),
@@ -268,7 +388,6 @@ def tela_colaboradores():
             else ([""] + microareas["nome"].tolist()).index(colab_row["microarea_principal"])
         )
 
-        # microarea da atividade
         micro_sel = st.selectbox(
             "Micro-área da atividade",
             options=microareas["nome"].tolist()
@@ -292,7 +411,6 @@ def tela_colaboradores():
         submitted_atuacao = st.form_submit_button("Salvar participação")
 
         if submitted_atuacao:
-            # atualiza microarea principal
             colabs.loc[colabs["id"] == colab_id, "microarea_principal"] = micro_princ
             save_csv(PATH_COLAB, colabs)
 
@@ -315,7 +433,6 @@ def tela_colaboradores():
                 save_csv(PATH_COLAB_ATIV, colab_ativ)
                 st.success("Área de atuação / atividade registrada para o colaborador.")
 
-    # ---- Mapa colaborador x atividade ----
     st.subheader("Mapa de atividades por colaborador")
     colab_ativ = get_colab_atividades()
     if colab_ativ.empty:
@@ -352,15 +469,21 @@ def tela_microareas_atividades():
     atividades = get_atividades()
     colabs = get_colaboradores()
 
+    # Botão de seed padrão
+    if st.button("Carregar lista padrão de micro-áreas e atividades"):
+        microareas, atividades = seed_default_microareas_atividades(microareas, atividades)
+        st.success("Lista padrão carregada/atualizada com sucesso!")
+
     tab_micro, tab_ativ = st.tabs(["Micro-áreas", "Atividades"])
 
-    # --- Micro-áreas ---
+    # Micro-áreas
     with tab_micro:
         st.subheader("Nova micro-área")
         with st.form("form_micro"):
             nome = st.text_input("Nome da micro-área")
             descricao = st.text_area("Descrição (opcional)")
             submitted = st.form_submit_button("Salvar micro-área")
+
             if submitted:
                 if not nome:
                     st.error("Informe um nome para a micro-área.")
@@ -386,7 +509,7 @@ def tela_microareas_atividades():
         else:
             st.dataframe(microareas, use_container_width=True)
 
-    # --- Atividades ---
+    # Atividades
     with tab_ativ:
         st.subheader("Nova atividade")
 
@@ -405,8 +528,12 @@ def tela_microareas_atividades():
                 options=[""] + colabs["nome"].tolist()
             )
             hh_por_unidade = st.number_input(
-                "Horas por unidade de atividade (hh/unidade)",
+                "Horas por execução dessa atividade (hh/unidade)",
                 min_value=0.0, step=0.5, value=1.0
+            )
+            fator_por_projeto = st.number_input(
+                "Fator por projeto (quantas execuções dessa atividade por projeto)",
+                min_value=0.0, step=0.1, value=1.0
             )
             submitted_ativ = st.form_submit_button("Salvar atividade")
 
@@ -420,7 +547,8 @@ def tela_microareas_atividades():
                         "microarea": micro,
                         "categoria": categoria,
                         "responsavel_funcao": responsavel_funcao,
-                        "hh_por_unidade": hh_por_unidade
+                        "hh_por_unidade": hh_por_unidade,
+                        "fator_por_projeto": fator_por_projeto
                     }
                     atividades = pd.concat(
                         [atividades, pd.DataFrame([new])],
@@ -445,44 +573,56 @@ def tela_demandas():
     atividades = get_atividades()
     demandas = get_demandas()
 
-    with st.form("form_demanda"):
+    if atividades.empty:
+        st.warning("Cadastre atividades antes de inserir demanda.")
+        return
+
+    st.subheader("Gerar demandas automaticamente a partir do número de projetos")
+
+    with st.form("form_demanda_projetos"):
         periodo = st.text_input("Período (ex.: 2025-11)", value="")
-        if atividades.empty:
-            st.warning("Cadastre atividades antes de inserir demanda.")
-            st.stop()
-
-        nome_ativ = st.selectbox(
-            "Atividade",
-            options=atividades["nome"].tolist()
+        num_projetos = st.number_input(
+            "Quantidade de projetos no período",
+            min_value=0.0, step=1.0, value=0.0
         )
 
-        quantidade = st.number_input(
-            "Quantidade prevista no período",
-            min_value=0.0, step=1.0, value=1.0
-        )
+        submitted_auto = st.form_submit_button("Gerar demandas para o período")
 
-        submitted_dem = st.form_submit_button("Salvar demanda")
-
-        if submitted_dem:
+        if submitted_auto:
             if not periodo:
                 st.error("Informe o período.")
+            elif num_projetos <= 0:
+                st.error("Informe uma quantidade de projetos maior que zero.")
             else:
-                row_ativ = atividades[atividades["nome"] == nome_ativ].iloc[0]
-                atividade_id = int(row_ativ["id"])
-                new = {
-                    "id": new_id(demandas),
-                    "periodo": periodo,
-                    "atividade_id": atividade_id,
-                    "quantidade": quantidade
-                }
-                demandas = pd.concat(
-                    [demandas, pd.DataFrame([new])],
-                    ignore_index=True
-                )
-                save_csv(PATH_DEM, demandas)
-                st.success("Demanda salva com sucesso!")
+                # remove demandas existentes do período
+                demandas = demandas[demandas["periodo"] != periodo].copy()
 
-    st.subheader("Demandas cadastradas")
+                novas_dem = []
+                next_id = new_id(demandas)
+
+                for _, row in atividades.iterrows():
+                    fator = row["fator_por_projeto"] if not pd.isna(row["fator_por_projeto"]) else 1.0
+                    qtd = num_projetos * fator
+                    if qtd <= 0:
+                        continue
+                    novas_dem.append({
+                        "id": next_id,
+                        "periodo": periodo,
+                        "atividade_id": int(row["id"]),
+                        "quantidade": qtd
+                    })
+                    next_id += 1
+
+                if novas_dem:
+                    demandas = pd.concat(
+                        [demandas, pd.DataFrame(novas_dem)],
+                        ignore_index=True
+                    )
+                    save_csv(PATH_DEM, demandas)
+                    st.success("Demandas geradas automaticamente a partir do número de projetos.")
+
+    st.subheader("Demandas cadastradas (todas as atividades)")
+
     if demandas.empty:
         st.info("Nenhuma demanda cadastrada ainda.")
     else:
@@ -517,89 +657,66 @@ def tela_painel():
         st.warning("Para visualizar o painel, é necessário ter colaboradores, atividades e demandas cadastradas.")
         return
 
-    # escolher período
     periodos = sorted(demandas["periodo"].dropna().unique().tolist())
     periodo_sel = st.selectbox("Selecione o período", options=periodos)
 
-    # quantos dias úteis considerar (pra chegar nas horas diárias)
     dias_uteis = st.number_input(
-        "Dias úteis no mês (para cálculo das horas diárias)",
+        "Dias úteis no período (para cálculo das horas diárias)",
         min_value=15, max_value=31, value=22, step=1
     )
 
-    # Cálculos mensais (como já existia)
-    df_caps = calcular_capacidades(colabs, periodo_sel)
-    df_aloc, df_micro = calcular_alocacoes(colabs, microareas, atividades, demandas, colab_ativ, periodo_sel)
+    df_caps = calcular_capacidades(colabs, dias_uteis)
+    df_aloc, df_micro = calcular_alocacoes(colabs, microareas, atividades, demandas, colab_ativ, periodo_sel, dias_uteis)
 
-    # ----------------- RESUMO GLOBAL DIÁRIO (estilo sua planilha) -----------------
-    st.subheader("Resumo diário global (laboratório)")
+    # Resumo global diário
+    st.subheader("Resumo diário global (todos os grupos)")
 
     if df_micro.empty:
         st.info("Nenhuma demanda para o período selecionado.")
     else:
-        # horas mensais totais necessárias (somando todas as micro-áreas)
         hh_mes_total = df_micro["hh_necessarias"].sum()
-
-        # horas por dia necessárias
         hh_dia_necessarias = hh_mes_total / dias_uteis if dias_uteis > 0 else 0
 
-        # colaboradores equivalentes de 8h/dia necessários
-        colabs_necessarios_8h = hh_dia_necessarias / 8 if hh_dia_necessarias > 0 else 0
-
-        # capacidade diária atual (somatório da carga_diaria de todos ativos)
         colabs_ativos = colabs[colabs["ativo"] == "sim"].copy()
         capacidade_dia_atual = colabs_ativos["carga_diaria"].fillna(0).sum()
 
-        # colaboradores equivalentes atuais (convertendo tudo para 8h)
+        colabs_necessarios_8h = hh_dia_necessarias / 8 if hh_dia_necessarias > 0 else 0
         colabs_atuais_equiv_8h = capacidade_dia_atual / 8 if capacidade_dia_atual > 0 else 0
-
         gap_colabs_8h = colabs_necessarios_8h - colabs_atuais_equiv_8h
 
         col1, col2 = st.columns(2)
         with col1:
-            st.metric(
-                "Horas diárias necessárias (todas as atividades)",
-                f"{hh_dia_necessarias:.2f} h/dia"
-            )
-            st.metric(
-                "Colaboradores 8h necessários",
-                f"{colabs_necessarios_8h:.2f}"
-            )
+            st.metric("Horas diárias necessárias", f"{hh_dia_necessarias:.2f} h/dia")
+            st.metric("Colaboradores 8h necessários", f"{colabs_necessarios_8h:.2f}")
         with col2:
-            st.metric(
-                "Capacidade diária atual",
-                f"{capacidade_dia_atual:.2f} h/dia"
-            )
-            st.metric(
-                "Colaboradores 8h equivalentes atuais",
-                f"{colabs_atuais_equiv_8h:.2f}"
-            )
+            st.metric("Capacidade diária atual", f"{capacidade_dia_atual:.2f} h/dia")
+            st.metric("Colaboradores 8h equivalentes atuais", f"{colabs_atuais_equiv_8h:.2f}")
 
         st.markdown(
             f"**Gap de colaboradores (equivalente a 8h/dia):** "
-            f"{gap_colabs_8h:.2f} (positivo = falta gente, negativo = sobra capacidade)"
+            f"{gap_colabs_8h:.2f}  (positivo = falta gente, negativo = sobra capacidade)"
         )
 
     st.markdown("---")
 
-    # ----------------- Visão por micro-área (igual já tínhamos, só reaproveitada) -----------------
-    st.subheader("Demanda x Capacidade por Micro-área")
+    # Micro-áreas
+    st.subheader("Demanda x Capacidade por Micro-área (mensal)")
 
     if df_micro.empty:
         st.info("Nenhuma demanda para o período selecionado.")
     else:
         st.dataframe(df_micro, use_container_width=True)
         st.bar_chart(
-            df_micro.set_index("microarea")[["hh_necessarias", "capacidade_microarea"]]
+            df_micro.set_index("microarea")[["hh_necessarias", "capacidade_mensal"]]
         )
 
-    # ----------------- Visão por colaborador -----------------
-    st.subheader("Utilização por colaborador")
+    # Colaboradores
+    st.subheader("Utilização por colaborador (mensal)")
 
     df_col = df_caps.merge(
         df_aloc,
-        left_on("id"),
-        right_on("id_colaborador"),
+        left_on="id",
+        right_on="id_colaborador",
         how="left"
     )
     df_col["hh_alocadas"] = df_col["hh_alocadas"].fillna(0.0)
@@ -610,13 +727,13 @@ def tela_painel():
 
     df_col_show = df_col[[
         "nome", "cargo", "microarea_principal",
-        "capacidade_mensal", "hh_alocadas", "utilizacao_%"
+        "capacidade_diaria", "capacidade_mensal", "hh_alocadas", "utilizacao_%"
     ]].sort_values("utilizacao_%", ascending=False)
 
     st.dataframe(df_col_show, use_container_width=True)
 
-    # ----------------- Necessidade adicional por micro-área -----------------
-    st.subheader("Necessidade de capacidade adicional por micro-área")
+    # Déficit por micro-área
+    st.subheader("Necessidade de capacidade adicional por Micro-área (mensal)")
 
     if not df_micro.empty:
         df_deficit = df_micro[df_micro["saldo"] < 0].copy()
@@ -624,15 +741,16 @@ def tela_painel():
             st.success("Não há déficit de capacidade nas micro-áreas para o período selecionado.")
         else:
             df_deficit["faltam_horas"] = -df_deficit["saldo"]
-            df_deficit["equiv_funcionarios"] = (df_deficit["faltam_horas"] / 160).round(2)
-            df_deficit["equiv_estagiarios"] = (df_deficit["faltam_horas"] / 120).round(2)
+            df_deficit["equiv_funcionarios"] = (df_deficit["faltam_horas"] / (8 * dias_uteis)).round(2)
+            df_deficit["equiv_estagiarios"] = (df_deficit["faltam_horas"] / (6 * dias_uteis)).round(2)
             st.dataframe(
                 df_deficit[[
-                    "microarea", "hh_necessarias", "capacidade_microarea",
+                    "microarea", "hh_necessarias", "capacidade_mensal",
                     "faltam_horas", "equiv_funcionarios", "equiv_estagiarios"
                 ]],
                 use_container_width=True
             )
+
 
 # ---------------------------
 # Navegação principal
