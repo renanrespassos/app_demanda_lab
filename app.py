@@ -389,7 +389,7 @@ def tela_colaboradores():
         colabs = seed_default_colaboradores(colabs)
         st.success("Colaboradores padrão carregados/atualizados com sucesso!")
 
-    # Cadastro básico
+    # ---------------- NOVO COLABORADOR ----------------
     st.subheader("Novo colaborador")
 
     with st.form("form_colaborador"):
@@ -432,7 +432,7 @@ def tela_colaboradores():
                 save_csv(PATH_COLAB, colabs)
                 st.success("Colaborador salvo com sucesso!")
 
-    # Tabela de colaboradores
+    # ---------------- LISTA DE COLABORADORES ----------------
     st.subheader("Colaboradores cadastrados")
     if colabs.empty:
         st.info("Nenhum colaborador cadastrado ainda.")
@@ -442,7 +442,7 @@ def tela_colaboradores():
         df_show["capacidade_mensal_22d"] = df_show["capacidade_diaria"] * 22
         st.dataframe(df_show, use_container_width=True)
 
-    # Editar / excluir colaborador
+    # ---------------- EDITAR / EXCLUIR COLABORADOR ----------------
     st.subheader("Editar / excluir colaborador")
     if not colabs.empty:
         nomes_colab = colabs["nome"].tolist()
@@ -452,10 +452,12 @@ def tela_colaboradores():
             col1, col2 = st.columns(2)
             with col1:
                 novo_nome = st.text_input("Nome", value=row["nome"], key="edit_colab_nome")
+                cargo_lista = ["Estagiário", "Assistente", "Analista", "Especialista", "Coordenador"]
+                idx_cargo = cargo_lista.index(row["cargo"]) if row["cargo"] in cargo_lista else 0
                 novo_cargo = st.selectbox(
                     "Cargo",
-                    ["Estagiário", "Assistente", "Analista", "Especialista", "Coordenador"],
-                    index=["Estagiário", "Assistente", "Analista", "Especialista", "Coordenador"].index(row["cargo"]) if row["cargo"] in ["Estagiário", "Assistente", "Analista", "Especialista", "Coordenador"] else 0,
+                    cargo_lista,
+                    index=idx_cargo,
                     key="edit_colab_cargo"
                 )
                 nova_carga = st.number_input(
@@ -496,14 +498,14 @@ def tela_colaboradores():
                     save_csv(PATH_COLAB, colabs)
                     st.success("Colaborador excluído.")
 
-    # Configuração de área de atuação e atividades por colaborador (modo rápido com multiselect)
-    st.subheader("Configurar área de atuação e atividades do colaborador")
+    # ---------------- VÍNCULO POR COLABORADOR (já existia) ----------------
+    st.subheader("Vincular atividades a um colaborador (modo por colaborador)")
 
     if colabs.empty or atividades.empty or microareas.empty:
         st.info("Cadastre colaboradores, micro-áreas e atividades para configurar área de atuação.")
         return
 
-    with st.form("form_atuacao"):
+    with st.form("form_atuacao_colab"):
         colab_nome = st.selectbox(
             "Colaborador",
             options=colabs["nome"].tolist()
@@ -538,7 +540,7 @@ def tela_colaboradores():
             min_value=0.0, max_value=100.0, value=50.0, step=5.0
         )
 
-        submitted_atuacao = st.form_submit_button("Salvar vínculos de atividades")
+        submitted_atuacao = st.form_submit_button("Salvar vínculos de atividades (por colaborador)")
 
         if submitted_atuacao:
             # atualiza microárea principal
@@ -566,7 +568,80 @@ def tela_colaboradores():
                     save_csv(PATH_COLAB_ATIV, colab_ativ)
                     st.success("Vínculos de atividades registrados para o colaborador.")
 
-    # Editar / excluir vínculos
+    # ---------------- NOVO: VÍNCULO POR ATIVIDADE ----------------
+    st.subheader("Vincular vários colaboradores a uma atividade (modo por atividade)")
+
+    with st.form("form_atuacao_atividade"):
+        micro_sel2 = st.selectbox(
+            "Micro-área da atividade",
+            options=microareas["nome"].tolist()
+        )
+
+        atividades_micro2 = atividades[atividades["microarea"] == micro_sel2]
+        if atividades_micro2.empty:
+            st.warning("Não há atividades cadastradas para esta micro-área.")
+            atividade_nome2 = None
+        else:
+            atividade_nome2 = st.selectbox(
+                "Atividade",
+                options=atividades_micro2["nome"].tolist()
+            )
+
+        nomes_colabs = colabs["nome"].tolist()
+        colabs_sel = st.multiselect(
+            "Colaboradores que participarão desta atividade",
+            options=nomes_colabs
+        )
+
+        percentuais = {}
+        if atividade_nome2 and colabs_sel:
+            st.markdown("**Percentual de participação por colaborador (%)**")
+            for nome_c in colabs_sel:
+                cid = int(colabs[colabs["nome"] == nome_c]["id"].iloc[0])
+                key_input = f"pct_{cid}_{atividade_nome2}"
+                valor = st.number_input(
+                    f"{nome_c} (%)",
+                    min_value=0.0, max_value=100.0,
+                    value=0.0,
+                    step=5.0,
+                    key=key_input
+                )
+                percentuais[cid] = valor
+
+        submitted_atuacao2 = st.form_submit_button("Salvar vínculos de colaboradores (por atividade)")
+
+        if submitted_atuacao2:
+            if not atividade_nome2:
+                st.error("Selecione uma atividade.")
+            elif not colabs_sel:
+                st.error("Selecione pelo menos um colaborador.")
+            else:
+                atividades = get_atividades()
+                colab_ativ = get_colab_atividades()
+
+                ativ_row2 = atividades[atividades["nome"] == atividade_nome2].iloc[0]
+                atividade_id2 = int(ativ_row2["id"])
+
+                for cid, pct in percentuais.items():
+                    # se já existe vínculo desse colaborador com essa atividade, atualiza
+                    mask = (colab_ativ["colab_id"] == cid) & (colab_ativ["atividade_id"] == atividade_id2)
+                    if mask.any():
+                        colab_ativ.loc[mask, "percentual"] = pct
+                        colab_ativ.loc[mask, "microarea"] = micro_sel2
+                    else:
+                        new_row = {
+                            "id": new_id(colab_ativ),
+                            "colab_id": cid,
+                            "atividade_id": atividade_id2,
+                            "microarea": micro_sel2,
+                            "percentual": pct
+                        }
+                        colab_ativ = pd.concat([colab_ativ, pd.DataFrame([new_row])], ignore_index=True)
+
+                save_csv(PATH_COLAB_ATIV, colab_ativ)
+                st.success("Participações por atividade atualizadas.")
+
+    # ---------------- EDITAR / EXCLUIR VÍNCULOS ----------------
     st.subheader("Editar / excluir vínculos de colaborador x atividade")
     colab_ativ = get_colab_atividades()
     if colab_ativ.empty:
