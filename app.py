@@ -89,6 +89,40 @@ DEFAULT_GRUPOS_ATIVIDADES = [
     ("Desenvolvimento", "Desenvolvimento de Melhorias"),
 ]
 
+# ---------------------------
+# Lista padrão de colaboradores: (cargo, microarea_principal, nome)
+# ---------------------------
+DEFAULT_COLABS = [
+    ("Estagiário", "Entrada", "Kaua"),
+    ("Estagiário", "Entrada", "Henrique"),
+    ("Assistente", "Entrada", "Cristian"),
+    ("Estagiário", "Entrada", "Isadora"),
+
+    ("Assistente", "17087", "Arthur"),
+
+    ("Analista", "EMC", "Philipe"),
+    ("Especialista", "EMC", "Elinaldo"),
+    ("Assistente", "EMC", "Fernando"),
+    ("Estagiário", "EMC", "João de Paula"),
+    ("Assistente", "EMC", "Eduardo Altnetter"),
+    ("Assistente", "EMC", "Júlia Nascimento"),
+    ("Analista", "EMC", "Felipe Constant"),
+
+    ("Assistente", "RF", "João Daneres"),
+    ("Assistente", "RF", "Bernardo"),
+    ("Estagiário", "RF", "Rafael"),
+    ("Assistente", "RF", "Francis"),
+    ("Assistente", "RF", "João Vitor"),
+    ("Estagiário", "RF", "Georgia"),
+
+    ("Analista", "3GPP", "Greter"),
+    ("Analista", "3GPP", "Eduardo Oliveira"),
+
+    ("Analista", "RF", "João Pinheiro"),
+    ("Assistente", "RF", "Marcelo"),
+
+    ("Estagiário", "Baterias", "Fabricio"),
+]
 
 # ---------------------------
 # Utilitários de dados
@@ -166,7 +200,6 @@ def get_colab_atividades():
     df["percentual"] = pd.to_numeric(df["percentual"], errors="coerce")
     return df
 
-
 # ---------------------------
 # Seed inicial de micro-áreas + atividades
 # ---------------------------
@@ -177,8 +210,9 @@ def seed_default_microareas_atividades(microareas, atividades):
 
     for grupo, _ in DEFAULT_GRUPOS_ATIVIDADES:
         if grupo and grupo not in existentes_micro:
+            base = microareas if not novas_micro else pd.concat([microareas, pd.DataFrame(novas_micro)], ignore_index=True)
             new = {
-                "id": new_id(microareas if not novas_micro else pd.concat([microareas, pd.DataFrame(novas_micro)], ignore_index=True)),
+                "id": new_id(base),
                 "nome": grupo,
                 "descricao": ""
             }
@@ -195,13 +229,14 @@ def seed_default_microareas_atividades(microareas, atividades):
 
     for grupo, nome in DEFAULT_GRUPOS_ATIVIDADES:
         if nome not in existentes_ativ:
+            base = atividades if not novas_ativ else pd.concat([atividades, pd.DataFrame(novas_ativ)], ignore_index=True)
             new = {
-                "id": new_id(atividades if not novas_ativ else pd.concat([atividades, pd.DataFrame(novas_ativ)], ignore_index=True)),
+                "id": new_id(base),
                 "nome": nome,
                 "microarea": grupo,
                 "categoria": "",
                 "responsavel_funcao": "",
-                "hh_por_unidade": 1.0,      # ajusta depois com seu tempo real
+                "hh_por_unidade": 1.0,      # ajusta depois
                 "fator_por_projeto": 1.0    # quantas vezes essa atividade aparece por projeto
             }
             novas_ativ.append(new)
@@ -213,6 +248,43 @@ def seed_default_microareas_atividades(microareas, atividades):
 
     return microareas, atividades
 
+# ---------------------------
+# Seed de colaboradores padrão
+# ---------------------------
+def seed_default_colaboradores(colabs):
+    """
+    Cria colaboradores padrão com base em DEFAULT_COLABS.
+    Não duplica nomes já existentes.
+    """
+    existentes = set(colabs["nome"].dropna().tolist())
+    novos = []
+
+    for cargo, microarea, nome in DEFAULT_COLABS:
+        if nome in existentes:
+            continue
+
+        if cargo == "Estagiário":
+            carga_diaria = 6.0
+        else:
+            carga_diaria = 8.0
+
+        base = colabs if not novos else pd.concat([colabs, pd.DataFrame(novos)], ignore_index=True)
+        novos.append({
+            "id": new_id(base),
+            "nome": nome,
+            "cargo": cargo,
+            "carga_diaria": carga_diaria,
+            "microarea_principal": microarea,
+            "microareas_secundarias": "",
+            "ativo": "sim",
+        })
+        existentes.add(nome)
+
+    if novos:
+        colabs = pd.concat([colabs, pd.DataFrame(novos)], ignore_index=True)
+        save_csv(PATH_COLAB, colabs)
+
+    return colabs
 
 # ---------------------------
 # Cálculos de capacidade e alocação
@@ -283,7 +355,7 @@ def calcular_alocacoes(colabs, microareas, atividades, demandas, colab_ativ, per
     else:
         df_aloc = pd.DataFrame(alocs).groupby("id_colaborador", as_index=False)["hh_alocadas"].sum()
 
-    # Demanda por micro-área
+    # Demanda por micro-área (mensal)
     dem_micro = dem_ativ.groupby("microarea", as_index=False)["hh_total_atividade"].sum()
     dem_micro.rename(columns={"hh_total_atividade": "hh_necessarias"}, inplace=True)
 
@@ -301,7 +373,6 @@ def calcular_alocacoes(colabs, microareas, atividades, demandas, colab_ativ, per
 
     return df_aloc, df_micro
 
-
 # ---------------------------
 # Tela: Colaboradores
 # ---------------------------
@@ -312,6 +383,11 @@ def tela_colaboradores():
     microareas = get_microareas()
     colab_ativ = get_colab_atividades()
     atividades = get_atividades()
+
+    # Botão para carregar colaboradores padrão
+    if st.button("Carregar lista padrão de colaboradores"):
+        colabs = seed_default_colaboradores(colabs)
+        st.success("Colaboradores padrão carregados/atualizados com sucesso!")
 
     # Cadastro básico
     st.subheader("Novo colaborador")
@@ -458,7 +534,6 @@ def tela_colaboradores():
         }, inplace=True)
         st.dataframe(df_show, use_container_width=True)
 
-
 # ---------------------------
 # Tela: Micro-áreas & Atividades
 # ---------------------------
@@ -563,7 +638,6 @@ def tela_microareas_atividades():
         else:
             st.dataframe(atividades, use_container_width=True)
 
-
 # ---------------------------
 # Tela: Demandas
 # ---------------------------
@@ -630,16 +704,26 @@ def tela_demandas():
             atividades[["id", "nome", "microarea", "hh_por_unidade"]],
             left_on="atividade_id",
             right_on="id",
-            suffixes=("", "_ativ")
+            how="left",
+            suffixes=("_dem", "_ativ")
         )
-        df_show["hh_total_atividade"] = df_show["quantidade"] * df_show["hh_por_unidade"]
-        df_show = df_show[[
-            "id_x", "periodo", "nome", "microarea",
-            "quantidade", "hh_por_unidade", "hh_total_atividade"
-        ]]
-        df_show.rename(columns={"id_x": "id_demanda", "nome": "atividade"}, inplace=True)
-        st.dataframe(df_show, use_container_width=True)
 
+        # id da demanda = id_dem; nome da atividade = nome
+        if "id_dem" in df_show.columns:
+            df_show.rename(columns={"id_dem": "id_demanda"}, inplace=True)
+        else:
+            df_show.rename(columns={"id_x": "id_demanda"}, inplace=True)
+
+        df_show["hh_total_atividade"] = df_show["quantidade"] * df_show["hh_por_unidade"]
+        df_show.rename(columns={"nome": "atividade"}, inplace=True)
+
+        cols = [
+            "id_demanda", "periodo", "atividade", "microarea",
+            "quantidade", "hh_por_unidade", "hh_total_atividade"
+        ]
+        cols = [c for c in cols if c in df_show.columns]
+
+        st.dataframe(df_show[cols], use_container_width=True)
 
 # ---------------------------
 # Tela: Painel
@@ -706,9 +790,10 @@ def tela_painel():
         st.info("Nenhuma demanda para o período selecionado.")
     else:
         st.dataframe(df_micro, use_container_width=True)
-        st.bar_chart(
-            df_micro.set_index("microarea")[["hh_necessarias", "capacidade_mensal"]]
-        )
+        if not df_micro.set_index("microarea")[["hh_necessarias", "capacidade_mensal"]].empty:
+            st.bar_chart(
+                df_micro.set_index("microarea")[["hh_necessarias", "capacidade_mensal"]]
+            )
 
     # Colaboradores
     st.subheader("Utilização por colaborador (mensal)")
@@ -750,7 +835,6 @@ def tela_painel():
                 ]],
                 use_container_width=True
             )
-
 
 # ---------------------------
 # Navegação principal
