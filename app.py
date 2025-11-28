@@ -517,13 +517,72 @@ def tela_painel():
         st.warning("Para visualizar o painel, é necessário ter colaboradores, atividades e demandas cadastradas.")
         return
 
+    # escolher período
     periodos = sorted(demandas["periodo"].dropna().unique().tolist())
     periodo_sel = st.selectbox("Selecione o período", options=periodos)
 
+    # quantos dias úteis considerar (pra chegar nas horas diárias)
+    dias_uteis = st.number_input(
+        "Dias úteis no mês (para cálculo das horas diárias)",
+        min_value=15, max_value=31, value=22, step=1
+    )
+
+    # Cálculos mensais (como já existia)
     df_caps = calcular_capacidades(colabs, periodo_sel)
     df_aloc, df_micro = calcular_alocacoes(colabs, microareas, atividades, demandas, colab_ativ, periodo_sel)
 
-    # --- Micro-área ---
+    # ----------------- RESUMO GLOBAL DIÁRIO (estilo sua planilha) -----------------
+    st.subheader("Resumo diário global (laboratório)")
+
+    if df_micro.empty:
+        st.info("Nenhuma demanda para o período selecionado.")
+    else:
+        # horas mensais totais necessárias (somando todas as micro-áreas)
+        hh_mes_total = df_micro["hh_necessarias"].sum()
+
+        # horas por dia necessárias
+        hh_dia_necessarias = hh_mes_total / dias_uteis if dias_uteis > 0 else 0
+
+        # colaboradores equivalentes de 8h/dia necessários
+        colabs_necessarios_8h = hh_dia_necessarias / 8 if hh_dia_necessarias > 0 else 0
+
+        # capacidade diária atual (somatório da carga_diaria de todos ativos)
+        colabs_ativos = colabs[colabs["ativo"] == "sim"].copy()
+        capacidade_dia_atual = colabs_ativos["carga_diaria"].fillna(0).sum()
+
+        # colaboradores equivalentes atuais (convertendo tudo para 8h)
+        colabs_atuais_equiv_8h = capacidade_dia_atual / 8 if capacidade_dia_atual > 0 else 0
+
+        gap_colabs_8h = colabs_necessarios_8h - colabs_atuais_equiv_8h
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric(
+                "Horas diárias necessárias (todas as atividades)",
+                f"{hh_dia_necessarias:.2f} h/dia"
+            )
+            st.metric(
+                "Colaboradores 8h necessários",
+                f"{colabs_necessarios_8h:.2f}"
+            )
+        with col2:
+            st.metric(
+                "Capacidade diária atual",
+                f"{capacidade_dia_atual:.2f} h/dia"
+            )
+            st.metric(
+                "Colaboradores 8h equivalentes atuais",
+                f"{colabs_atuais_equiv_8h:.2f}"
+            )
+
+        st.markdown(
+            f"**Gap de colaboradores (equivalente a 8h/dia):** "
+            f"{gap_colabs_8h:.2f} (positivo = falta gente, negativo = sobra capacidade)"
+        )
+
+    st.markdown("---")
+
+    # ----------------- Visão por micro-área (igual já tínhamos, só reaproveitada) -----------------
     st.subheader("Demanda x Capacidade por Micro-área")
 
     if df_micro.empty:
@@ -534,13 +593,13 @@ def tela_painel():
             df_micro.set_index("microarea")[["hh_necessarias", "capacidade_microarea"]]
         )
 
-    # --- Colaborador ---
+    # ----------------- Visão por colaborador -----------------
     st.subheader("Utilização por colaborador")
 
     df_col = df_caps.merge(
         df_aloc,
-        left_on="id",
-        right_on="id_colaborador",
+        left_on("id"),
+        right_on("id_colaborador"),
         how="left"
     )
     df_col["hh_alocadas"] = df_col["hh_alocadas"].fillna(0.0)
@@ -556,8 +615,8 @@ def tela_painel():
 
     st.dataframe(df_col_show, use_container_width=True)
 
-    # --- Necessidade adicional ---
-    st.subheader("Necessidade de capacidade adicional")
+    # ----------------- Necessidade adicional por micro-área -----------------
+    st.subheader("Necessidade de capacidade adicional por micro-área")
 
     if not df_micro.empty:
         df_deficit = df_micro[df_micro["saldo"] < 0].copy()
@@ -574,7 +633,6 @@ def tela_painel():
                 ]],
                 use_container_width=True
             )
-
 
 # ---------------------------
 # Navegação principal
